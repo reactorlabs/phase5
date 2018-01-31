@@ -1,0 +1,90 @@
+#!/bin/bash -e
+
+SCRIPTPATH=`cd $(dirname "$0") && pwd`
+if [ ! -d $SCRIPTPATH ]; then
+    echo "Could not determine absolute dir of $0"
+    echo "Maybe accessed with symlink"
+fi
+export SCRIPTPATH
+
+export BUILD_DIR=`pwd`
+if [ ! -f $BUILD_DIR/librir.* ]; then
+    echo "could not find librjit. are you in the correct directory?"
+    exit 1
+fi
+
+if [ "$#" -eq 1 ]; then
+    export R_HOME=$2
+    if [ ! -f $R_HOME/bin/R ]; then
+        echo "invalid R_HOME given"
+        exit 1
+    fi
+else
+    R_HOME=`cat ${BUILD_DIR}/.R_HOME`
+    export R_HOME
+fi
+
+. "${SCRIPTPATH}/script_include.sh"
+
+export ROOT_DIR="${SCRIPTPATH}/.."
+
+STATUS=$(mktemp /tmp/r-test-status.XXXXXX)
+touch $STATUS
+export STATUS
+
+PARENT=$$
+export PARENT
+
+function run_test {
+  test=$0
+
+  R="${R_HOME}/bin/R"
+  
+  if test "$(uname)" = "Darwin"; then
+      LIB="dyn.load('${BUILD_DIR}/librir.dylib')"
+  else
+      LIB="dyn.load('${BUILD_DIR}/librir.so')"
+  fi
+  
+  name=`basename $test`
+  
+  function status {
+    done=`wc -l < $STATUS`
+    echo -ne "\e[0K\r[${done}/${NUM_TESTS}] ${name} "
+  }
+  status
+  
+  TEST=$(mktemp /tmp/r-test.XXXXXX)
+  echo ${LIB} > $TEST
+  echo "sys.source('${ROOT_DIR}/rir/R/rir.R')" >> $TEST
+  grep -v 'require("rir")' ${test} | grep -v 'require(rir)'  >> $TEST
+  
+  $R --no-init-file -f $TEST &> /dev/null
+  res=$?
+
+  ps -p $PARENT &> /dev/null
+  if [ $? -ne 0 ]; then
+      rm $TEST
+      exit
+  fi
+
+  if [ $res -ne 0 ]; then
+      echo -e "\nfailed test $name:\n   $R -f $TEST"
+      exit 255
+  fi
+  rm $TEST
+  echo $name >> $STATUS
+
+  status
+}
+export -f run_test
+
+TESTS_PATH="${ROOT_DIR}/rir/tests"
+
+NUM_TESTS=`find ${TESTS_PATH} -name '*.R' | wc -l`
+export NUM_TESTS
+
+find ${TESTS_PATH} -name '*.R' | xargs -n 1 -P `ncores` bash -c 'run_test $@'
+
+rm -rf $STATUS
+echo ""

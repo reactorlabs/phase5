@@ -1,0 +1,22 @@
+#!/bin/sh
+
+set -e
+
+TYPE=$1
+
+SCRIPTPATH=`cd $(dirname "$0") && pwd`
+if [ ! -d $SCRIPTPATH ]; then
+    echo "Could not determine absolute dir of $0"
+    echo "Maybe accessed with symlink"
+fi
+
+# Run install script to deploy new hooks
+$SCRIPTPATH/install_hooks.sh
+
+HOOKS_PATH="${SCRIPTPATH}/${TYPE}.d"
+
+for script in `ls -v ${HOOKS_PATH}/*.hook`; do
+    name=`basename $script | sed 's/[0-9][0-9]-//' | sed 's/\.hook$//'`
+    echo "-> $name"
+    $script $SCRIPTPATH/..
+done
